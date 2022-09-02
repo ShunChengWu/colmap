@@ -92,8 +92,18 @@ void BundleAdjustmentController::Run() {
   for (const image_t image_id : reg_image_ids) {
     ba_config.AddImage(image_id);
   }
-  ba_config.SetConstantPose(reg_image_ids[0]);
-  ba_config.SetConstantTvec(reg_image_ids[1], {0});
+
+  if(ba_options.fixed_poses.empty()) {
+    ba_config.SetConstantPose(reg_image_ids[0]);
+    ba_config.SetConstantTvec(reg_image_ids[1], {0});
+  } else {
+    std::stringstream ss;
+    for (auto idx:ba_options.fixed_poses)
+      ss << idx << " ";
+    LOG(INFO) << "use custom fixed poses with image ids: " << ss.str();
+    for (auto idx:ba_options.fixed_poses)
+      ba_config.SetConstantPose(idx);
+  }
 
   // Run bundle adjustment.
   BundleAdjuster bundle_adjuster(ba_options, ba_config);

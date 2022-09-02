@@ -197,7 +197,9 @@ Camera ReadCameraRow(sqlite3_stmt* sql_stmt) {
   Camera camera;
 
   camera.SetCameraId(static_cast<camera_t>(sqlite3_column_int64(sql_stmt, 0)));
-  camera.SetModelId(sqlite3_column_int64(sql_stmt, 1));
+  auto model_id = sqlite3_column_int64(sql_stmt, 1);
+  LOG(INFO) << "model_id:" << model_id;//<< printf("model_id: %lld\n",model_id);
+  camera.SetModelId(model_id);
   camera.SetWidth(static_cast<size_t>(sqlite3_column_int64(sql_stmt, 2)));
   camera.SetHeight(static_cast<size_t>(sqlite3_column_int64(sql_stmt, 3)));
 

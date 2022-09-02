@@ -172,6 +172,7 @@ class OptionManager {
   std::vector<std::pair<std::string, const int*>> options_int_;
   std::vector<std::pair<std::string, const double*>> options_double_;
   std::vector<std::pair<std::string, const std::string*>> options_string_;
+  std::vector<std::pair<std::string, const std::vector<int>*>> options_int_vector_;
 
   bool added_log_options_;
   bool added_random_options_;
@@ -258,6 +259,9 @@ void OptionManager::RegisterOption(const std::string& name, const T* option) {
   } else if (std::is_same<T, std::string>::value) {
     options_string_.emplace_back(name,
                                  reinterpret_cast<const std::string*>(option));
+  } else if (std::is_same<T,std::vector<int>>::value) {
+    options_int_vector_.emplace_back(name,
+                                     reinterpret_cast<const std::vector<int>*>(option));
   } else {
     LOG(FATAL) << "Unsupported option type";
   }
