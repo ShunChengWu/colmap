@@ -38,6 +38,15 @@
 
 #include "util/logging.h"
 
+namespace std {
+static inline std::ostream& operator<<(std::ostream& os, const std::vector<int>& vec) {
+  for (auto item : vec) {
+    os << item << " ";
+  }
+  return os;
+}
+}
+
 namespace colmap {
 
 struct ImageReaderOptions;
@@ -151,6 +160,10 @@ class OptionManager {
                                    const std::string& help_text = "");
 
   template <typename T>
+  void AddAndRegisterMultiTokenOption(const std::string& name, T* option,
+                                   const std::string& help_text = "");
+
+  template <typename T>
   void RegisterOption(const std::string& name, const T* option);
 
   std::shared_ptr<boost::program_options::options_description> desc_;
@@ -219,6 +232,17 @@ void OptionManager::AddAndRegisterDefaultOption(const std::string& name,
   desc_->add_options()(
       name.c_str(),
       boost::program_options::value<T>(option)->default_value(*option),
+      help_text.c_str());
+  RegisterOption(name, option);
+}
+
+template <typename T>
+void OptionManager::AddAndRegisterMultiTokenOption(const std::string& name,
+                                                T* option,
+                                                const std::string& help_text) {
+  desc_->add_options()(
+      name.c_str(),
+      boost::program_options::value<T>(option)->multitoken()->default_value(*option),
       help_text.c_str());
   RegisterOption(name, option);
 }

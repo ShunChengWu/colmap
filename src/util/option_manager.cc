@@ -467,6 +467,12 @@ void OptionManager::AddBundleAdjustmentOptions() {
                               &bundle_adjustment->refine_extra_params);
   AddAndRegisterDefaultOption("BundleAdjustment.refine_extrinsics",
                               &bundle_adjustment->refine_extrinsics);
+  AddAndRegisterMultiTokenOption("BundleAdjustment.fixed_poses",
+                              &bundle_adjustment->fixed_poses,
+                                 "This is not the image_id, but the index of the image should be fixed in the image list");
+  AddAndRegisterMultiTokenOption("BundleAdjustment.fixed_tvecs",
+                                 &bundle_adjustment->fixed_tvecs,
+                                 "This is not the image_id, but the index of the image should be fixed in the image list");
 }
 
 void OptionManager::AddMapperOptions() {
