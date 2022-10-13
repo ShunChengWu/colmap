@@ -45,7 +45,7 @@
 namespace colmap {
 
 Reconstruction::Reconstruction()
-    : correspondence_graph_(nullptr), num_added_points3D_(0) {}
+    : correspondence_graph_(nullptr), num_added_points3D_(0),num_added_pointsInvD_(0) {}
 
 std::unordered_set<point3D_t> Reconstruction::Point3DIds() const {
   std::unordered_set<point3D_t> point3D_ids;
@@ -189,6 +189,23 @@ point3D_t Reconstruction::AddPoint3D(const Eigen::Vector3d& xyz,
   }
 
   return point3D_id;
+}
+
+pointInvD_t Reconstruction::AddPointInvD(
+    double inverseDepth,
+    const TrackElement &hostFrame,
+    const Track& track,
+    const IntensityPatch& intensityPatch){
+  const pointInvD_t  pointInvD_id = ++num_added_pointsInvD_;
+  CHECK(!ExistsPointInvD(pointInvD_id));
+
+  class PointInvD &pointInvD = pointsInvD_[pointInvD_id];
+
+  pointInvD.SetInverseDepth(inverseDepth);
+  pointInvD.SetHostFrame(hostFrame);
+  pointInvD.SetTrack(track);
+  pointInvD.SetIntensityPatch(intensityPatch);
+  return pointInvD_id;
 }
 
 void Reconstruction::AddObservation(const point3D_t point3D_id,
@@ -745,6 +762,24 @@ void Reconstruction::Read(const std::string& path) {
     LOG(FATAL) << "cameras, images, points3D files do not exist at " << path;
   }
 }
+
+void Reconstruction::ReadImagesForPBA(const std::string &path) {
+  Bitmap bitmap;
+  for (size_t i = 0; i < reg_image_ids_.size(); ++i) {
+    class Image &image = Image(reg_image_ids_[i]);
+    const std::string image_path = JoinPaths(path, image.Name());
+
+    if(!bitmap.Read(image_path,false)) {
+      std::cout << StringPrintf("Could not read image %s at path %s.",
+                                image.Name().c_str(), image_path.c_str())
+                << std::endl;
+    }
+
+    //TODO: compute gradient map
+    image.InitForPBA(bitmap);
+  }
+}
+
 
 void Reconstruction::Write(const std::string& path) const { WriteBinary(path); }
 

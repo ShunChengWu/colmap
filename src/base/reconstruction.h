@@ -44,6 +44,7 @@
 #include "base/image.h"
 #include "base/point2d.h"
 #include "base/point3d.h"
+#include "base/pointInvD.h"
 #include "base/similarity_transform.h"
 #include "base/track.h"
 #include "estimators/similarity_transform.h"
@@ -77,12 +78,14 @@ class Reconstruction {
   inline size_t NumImages() const;
   inline size_t NumRegImages() const;
   inline size_t NumPoints3D() const;
+  inline size_t NumPointsInvD() const;
   inline size_t NumImagePairs() const;
 
   // Get const objects.
   inline const class Camera& Camera(const camera_t camera_id) const;
   inline const class Image& Image(const image_t image_id) const;
   inline const class Point3D& Point3D(const point3D_t point3D_id) const;
+  inline const class PointInvD& PointInvD(const pointInvD_t pointInvD_id) const;
   inline const ImagePairStat& ImagePair(const image_pair_t pair_id) const;
   inline ImagePairStat& ImagePair(const image_t image_id1,
                                   const image_t image_id2);
@@ -91,6 +94,7 @@ class Reconstruction {
   inline class Camera& Camera(const camera_t camera_id);
   inline class Image& Image(const image_t image_id);
   inline class Point3D& Point3D(const point3D_t point3D_id);
+  inline class PointInvD& PointInvD(const pointInvD_t pointInvD_id);
   inline ImagePairStat& ImagePair(const image_pair_t pair_id);
   inline const ImagePairStat& ImagePair(const image_t image_id1,
                                         const image_t image_id2) const;
@@ -100,6 +104,7 @@ class Reconstruction {
   inline const EIGEN_STL_UMAP(image_t, class Image) & Images() const;
   inline const std::vector<image_t>& RegImageIds() const;
   inline const EIGEN_STL_UMAP(point3D_t, class Point3D) & Points3D() const;
+  inline const EIGEN_STL_UMAP(pointInvD_t, class PointInvD) & PointsInvD() const;
   inline const std::unordered_map<image_pair_t, ImagePairStat>& ImagePairs()
       const;
 
@@ -110,6 +115,7 @@ class Reconstruction {
   inline bool ExistsCamera(const camera_t camera_id) const;
   inline bool ExistsImage(const image_t image_id) const;
   inline bool ExistsPoint3D(const point3D_t point3D_id) const;
+  inline bool ExistsPointInvD(const pointInvD_t pointInvD_id) const;
   inline bool ExistsImagePair(const image_pair_t pair_id) const;
 
   // Load data from given `DatabaseCache`.
@@ -138,6 +144,13 @@ class Reconstruction {
   point3D_t AddPoint3D(
       const Eigen::Vector3d& xyz, const Track& track,
       const Eigen::Vector3ub& color = Eigen::Vector3ub::Zero());
+
+  //TODO: add API for PointInvD
+  pointInvD_t AddPointInvD(
+      double inverseDepth,
+      const TrackElement &hostTrack,
+      const Track& track,
+      const IntensityPatch& patch);
 
   // Add observation to existing 3D point.
   void AddObservation(const point3D_t point3D_id, const TrackElement& track_el);
@@ -282,6 +295,12 @@ class Reconstruction {
   void WriteText(const std::string& path) const;
   void WriteBinary(const std::string& path) const;
 
+  /**
+   * Read images to grayscale and compute the gradient map for PBA
+   * @param path The path to image folder.
+   */
+  void ReadImagesForPBA(const std::string& path);
+
   // Convert 3D points in reconstruction to PLY point cloud.
   std::vector<PlyPoint> ConvertToPLY() const;
 
@@ -423,6 +442,9 @@ class Reconstruction {
   EIGEN_STL_UMAP(image_t, class Image) images_;
   EIGEN_STL_UMAP(point3D_t, class Point3D) points3D_;
 
+  /*PBA related*/
+  EIGEN_STL_UMAP(pointInvD_t, class PointInvD) pointsInvD_;
+
   std::unordered_map<image_pair_t, ImagePairStat> image_pair_stats_;
 
   // { image_id, ... } where `images_.at(image_id).registered == true`.
@@ -430,6 +452,8 @@ class Reconstruction {
 
   // Total number of added 3D points, used to generate unique identifiers.
   point3D_t num_added_points3D_;
+
+  pointInvD_t num_added_pointsInvD_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -443,6 +467,8 @@ size_t Reconstruction::NumImages() const { return images_.size(); }
 size_t Reconstruction::NumRegImages() const { return reg_image_ids_.size(); }
 
 size_t Reconstruction::NumPoints3D() const { return points3D_.size(); }
+
+size_t Reconstruction::NumPointsInvD() const { return pointsInvD_.size(); }
 
 size_t Reconstruction::NumImagePairs() const {
   return image_pair_stats_.size();
@@ -458,6 +484,10 @@ const class Image& Reconstruction::Image(const image_t image_id) const {
 
 const class Point3D& Reconstruction::Point3D(const point3D_t point3D_id) const {
   return points3D_.at(point3D_id);
+}
+
+const class PointInvD& Reconstruction::PointInvD(const point3D_t point3D_id) const {
+  return pointsInvD_.at(point3D_id);
 }
 
 const Reconstruction::ImagePairStat& Reconstruction::ImagePair(
@@ -481,6 +511,10 @@ class Image& Reconstruction::Image(const image_t image_id) {
 
 class Point3D& Reconstruction::Point3D(const point3D_t point3D_id) {
   return points3D_.at(point3D_id);
+}
+
+class PointInvD& Reconstruction::PointInvD(const point3D_t point3D_id) {
+  return pointsInvD_.at(point3D_id);
 }
 
 Reconstruction::ImagePairStat& Reconstruction::ImagePair(
@@ -510,6 +544,10 @@ const EIGEN_STL_UMAP(point3D_t, Point3D) & Reconstruction::Points3D() const {
   return points3D_;
 }
 
+const EIGEN_STL_UMAP(pointInvD_t , PointInvD) & Reconstruction::PointsInvD() const {
+  return pointsInvD_;
+}
+
 const std::unordered_map<image_pair_t, Reconstruction::ImagePairStat>&
 Reconstruction::ImagePairs() const {
   return image_pair_stats_;
@@ -525,6 +563,10 @@ bool Reconstruction::ExistsImage(const image_t image_id) const {
 
 bool Reconstruction::ExistsPoint3D(const point3D_t point3D_id) const {
   return points3D_.find(point3D_id) != points3D_.end();
+}
+
+bool Reconstruction::ExistsPointInvD(const pointInvD_t pointInvD_id) const {
+  return pointsInvD_.find(pointInvD_id) != pointsInvD_.end();
 }
 
 bool Reconstruction::ExistsImagePair(const image_pair_t pair_id) const {

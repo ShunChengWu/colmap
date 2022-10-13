@@ -36,6 +36,9 @@ project(COLMAP)
 set(COLMAP_VERSION "3.8")
 set(COLMAP_VERSION_NUMBER "3800")
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 ################################################################################
 # Include CMake dependencies
@@ -477,3 +480,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeUninstall.cmake.in"
                IMMEDIATE @ONLY)
 add_custom_target(uninstall COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/CMakeUninstall.cmake)
 set_target_properties(uninstall PROPERTIES FOLDER ${CMAKE_TARGETS_ROOT_FOLDER})
+
+
+
+ADD_SUBDIRECTORY(test)

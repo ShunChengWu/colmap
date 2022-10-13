@@ -37,6 +37,14 @@
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
 
+
+//#include <vector>
+#include "base/intensityPatch.h"
+//#include "optim/photometric_bundle_adjustment.h"  //TODO: maybe move this to a seperate file?
+#include "util/pba.h"
+#include "util/types.h"
+//#include <Eigen/Geometry>
+
 namespace colmap {
 
 // Standard bundle adjustment cost function for variable
@@ -149,6 +157,494 @@ class BundleAdjustmentConstantPoseCostFunction {
   const double tz_;
   const double observed_x_;
   const double observed_y_;
+};
+
+
+template<class CameraModel, class T> bool photometricLoss(
+    const IntensityPatch &patch_i,
+    const Eigen::Vector2i &boundary,
+    const T* const qvec_i, const T* const tvec_i,
+    const T* const qvec_j, const T* const tvec_j,
+    const T* const camera_params_i, const T* const camera_params_j,
+    T const* const ab_i, T const * const ab_j,
+    const std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> &interpolator_j,
+    T const* const invD,
+    bool useInvGradWeight, double weightC,
+    T* sResiduals
+){
+
+
+  /*build affine*/
+  Eigen::Matrix<T,2,1> affine;
+  const T t_j = T(1), t_i = T(1);//assume exposure time are the same
+  affine.x() = ceres::exp(ab_j[0]-ab_i[0])*t_j/t_i;
+  affine.y() = ab_j[1] - affine.x()*ab_i[1];
+
+  Eigen::Matrix<T,NumResidualPattern,1> I_j;
+  T intensity;
+  Eigen::Map<Eigen::Matrix<T, NumResidualPattern, 1>> residuals(sResiduals);
+  Eigen::Map<Eigen::Quaternion<T> const> const eigen_qvec_i(qvec_i), eigen_qvec_j(qvec_j);
+  Eigen::Map<Eigen::Vector3<T> const> const eigen_tvec_i(tvec_i), eigen_tvec_j(tvec_j);
+
+  T depth = T(1)/ (*invD);
+  for(size_t i=0;i<NumResidualPattern;++i) {
+    /*reproject to world*/
+    Eigen::Vector3<T> pt3D;
+    pt3D.z() = T(1);
+
+    CameraModel::ImageToWorld(
+        camera_params_i,
+        patch_i.coords.col(i).cast<T>()[0],
+        patch_i.coords.col(i).cast<T>()[1],
+        &pt3D[0],
+        &pt3D[1]);
+    pt3D *= depth;
+
+    /*project from frame coord. i to j*/
+//    // from i to world
+    pt3D = eigen_qvec_i.inverse() * pt3D;
+    pt3D += -(eigen_qvec_i.inverse()*eigen_tvec_i);
+    // from world to i
+    pt3D = eigen_qvec_j * pt3D;
+    pt3D += eigen_tvec_j;
+
+//    pt3D = T_j_i.template topLeftCorner<3,3>() * pt3D + T_j_i.template topRightCorner<3,1>();
+
+    /*project to image*/
+    pt3D[0] /= pt3D[2];
+    pt3D[1] /= pt3D[2];
+
+    Eigen::Matrix<T,2,1> p2d_i_in_j;
+    CameraModel::WorldToImage(camera_params_j, pt3D[0],pt3D[1],
+                              &p2d_i_in_j[0],&p2d_i_in_j[1]);
+
+    interpolator_j->Evaluate(p2d_i_in_j.y(), p2d_i_in_j.x(), &intensity);
+    I_j.row(i) << intensity;
+  }
+
+  /*calculate reverse weight according to DSO*/
+  Eigen::Matrix<T,NumResidualPattern,1> Weight = Eigen::Matrix<T,NumResidualPattern,1>::Ones();
+  if(useInvGradWeight)
+  {
+    T C2 = T(weightC);
+    auto absGrads = patch_i.gradients.cwiseAbs().cast<T>() / T(255);
+    Weight.array() = C2 / (C2+absGrads.array()*absGrads.array());
+  }
+
+  residuals = Weight.array() * (I_j.array()-(affine.x()*patch_i.intensities.array()+affine.y()));
+//  for (size_t i=0;i<NumResidualPattern;++i) {
+//    residuals.row(i) = Weight.row(i) * residuals[i];
+//  }
+  return true;
+}
+
+// Photometric bundle adjustment cost function
+template <typename CameraModel>
+class PhotometricBundleAdjustmentCostFunction {
+ public:
+  explicit PhotometricBundleAdjustmentCostFunction(
+      const IntensityPatch & patch_i,
+      std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+      Eigen::Vector2i imageBoundary, double constC)
+      : patch_i_(patch_i),
+        imageBoundary_(std::move(imageBoundary)),
+        interpolator_j_(std::move(interpolator_j)),
+        constC_(constC)
+  {}
+
+  static ceres::CostFunction* CreateOneCam(const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                           double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentCostFunction<CameraModel>, NumResidualPattern,
+                4, 3, 4, 3, CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentCostFunction(
+            patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  static ceres::CostFunction* CreateTwoCams(const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                            double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentCostFunction<CameraModel>, NumResidualPattern,
+            4, 3, 4, 3, CameraModel::kNumParams,CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentCostFunction(
+            patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  /*One camera*/
+  template <typename T>
+  bool operator()(const T* const qvec_i, const T* const tvec_i,
+                  const T* const qvec_j, const T* const tvec_j,
+                  const T* const camera_params,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params,camera_params,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+  /*Two Cam*/
+  template <typename T>
+  bool operator()(const T* const qvec_i, const T* const tvec_i,
+                  const T* const qvec_j, const T* const tvec_j,
+                  const T* const camera_params_i, const T* const camera_params_j,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params_i,camera_params_j,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+ private:
+  IntensityPatch patch_i_;
+  Eigen::Vector2i imageBoundary_;
+  std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>
+      interpolator_j_;
+  double constC_;
+};
+
+template <typename CameraModel>
+class PhotometricBundleAdjustmentConstantSrcCostFunction {
+ public:
+  explicit PhotometricBundleAdjustmentConstantSrcCostFunction(
+      const Eigen::Vector4d& qvec_i,
+      const Eigen::Vector3d& tvec_i,
+      const IntensityPatch & patch_i,
+      std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+      Eigen::Vector2i imageBoundary,
+      double constC)
+      : qw_i_(qvec_i(0)),
+        qx_i_(qvec_i(1)),
+        qy_i_(qvec_i(2)),
+        qz_i_(qvec_i(3)),
+        tx_i_(tvec_i(0)),
+        ty_i_(tvec_i(1)),
+        tz_i_(tvec_i(2)),
+        patch_i_(patch_i),
+        imageBoundary_(std::move(imageBoundary)),
+        interpolator_j_(std::move(interpolator_j)),
+        constC_(constC)
+  {}
+
+  static ceres::CostFunction* CreateOneCam(const Eigen::Vector4d& qvec_i,
+                                     const Eigen::Vector3d& tvec_i,
+                                     const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                           double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentConstantSrcCostFunction<CameraModel>, NumResidualPattern,
+            4, 3, CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentConstantSrcCostFunction(
+            qvec_i,tvec_i,patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  static ceres::CostFunction* CreateTwoCams(const Eigen::Vector4d& qvec_i,
+                                     const Eigen::Vector3d& tvec_i,
+                                     const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                            double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentConstantSrcCostFunction<CameraModel>, NumResidualPattern,
+            4, 3, CameraModel::kNumParams,CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentConstantSrcCostFunction(
+            qvec_i,tvec_i,patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  /*One camera*/
+  template <typename T>
+  bool operator()(const T* const qvec_j, const T* const tvec_j,
+                  const T* const camera_params,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    const T qvec_i[4] = {T(qw_i_), T(qx_i_), T(qy_i_), T(qz_i_)};
+    const T tvec_i[3] = {T(tx_i_), T(ty_i_), T(tz_i_)};
+
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params,camera_params,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+  /*Two cameras*/
+  template <typename T>
+  bool operator()(const T* const qvec_j, const T* const tvec_j,
+                  const T* const camera_params_i, const T* const camera_params_j,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    const T qvec_i[4] = {T(qw_i_), T(qx_i_), T(qy_i_), T(qz_i_)};
+    const T tvec_i[3] = {T(tx_i_), T(ty_i_), T(tz_i_)};
+
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params_i,camera_params_j,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+ private:
+  const double qw_i_;
+  const double qx_i_;
+  const double qy_i_;
+  const double qz_i_;
+  const double tx_i_;
+  const double ty_i_;
+  const double tz_i_;
+  IntensityPatch patch_i_;
+  Eigen::Vector2i imageBoundary_;
+  std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>
+      interpolator_j_;
+  double constC_;
+};
+
+template <typename CameraModel>
+class PhotometricBundleAdjustmentConstantTgtCostFunction {
+ public:
+  explicit PhotometricBundleAdjustmentConstantTgtCostFunction(
+      const Eigen::Vector4d& qvec_j,
+      const Eigen::Vector3d& tvec_j,
+      const IntensityPatch & patch_i,
+      std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+      Eigen::Vector2i imageBoundary,
+      double constC)
+      : qw_j_(qvec_j(0)),
+        qx_j_(qvec_j(1)),
+        qy_j_(qvec_j(2)),
+        qz_j_(qvec_j(3)),
+        tx_j_(tvec_j(0)),
+        ty_j_(tvec_j(1)),
+        tz_j_(tvec_j(2)),
+        patch_i_(patch_i),
+        imageBoundary_(std::move(imageBoundary)),
+        interpolator_j_(std::move(interpolator_j)),
+        constC_(constC)
+  {}
+
+  static ceres::CostFunction* CreateOneCam(const Eigen::Vector4d& qvec_j,
+                                     const Eigen::Vector3d& tvec_j,
+                                     const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                           double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentConstantTgtCostFunction<CameraModel>, NumResidualPattern,
+            4, 3, CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentConstantTgtCostFunction(
+            qvec_j,tvec_j,patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  static ceres::CostFunction* CreateTwoCams(const Eigen::Vector4d& qvec_j,
+                                     const Eigen::Vector3d& tvec_j,
+                                     const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                            double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentConstantTgtCostFunction<CameraModel>, NumResidualPattern,
+            4, 3, CameraModel::kNumParams,CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentConstantTgtCostFunction(
+            qvec_j,tvec_j,patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  /*One camera*/
+  template <typename T>
+  bool operator()(const T* const qvec_i, const T* const tvec_i,
+                  const T* const camera_params,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    const T qvec_j[4] = {T(qw_j_), T(qx_j_), T(qy_j_), T(qz_j_)};
+    const T tvec_j[3] = {T(tx_j_), T(ty_j_), T(tz_j_)};
+
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params,camera_params,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+  /*Two Cams*/
+  template <typename T>
+  bool operator()(const T* const qvec_i, const T* const tvec_i,
+                  const T* const camera_params_i, const T* const camera_params_j,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    const T qvec_j[4] = {T(qw_j_), T(qx_j_), T(qy_j_), T(qz_j_)};
+    const T tvec_j[3] = {T(tx_j_), T(ty_j_), T(tz_j_)};
+
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params_i,camera_params_j,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+ private:
+  const double qw_j_;
+  const double qx_j_;
+  const double qy_j_;
+  const double qz_j_;
+  const double tx_j_;
+  const double ty_j_;
+  const double tz_j_;
+  IntensityPatch patch_i_;
+  Eigen::Vector2i imageBoundary_;
+  std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>
+      interpolator_j_;
+  double constC_;
+};
+
+template <typename CameraModel>
+class PhotometricBundleAdjustmentConstantCostFunction {
+ public:
+  explicit PhotometricBundleAdjustmentConstantCostFunction(
+      const Eigen::Vector4d& qvec_i,
+      const Eigen::Vector3d& tvec_i,
+      const Eigen::Vector4d& qvec_j,
+      const Eigen::Vector3d& tvec_j,
+      const IntensityPatch & patch_i,
+      std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+      Eigen::Vector2i imageBoundary,
+      double constC)
+      : qw_i_(qvec_i(0)),
+        qx_i_(qvec_i(1)),
+        qy_i_(qvec_i(2)),
+        qz_i_(qvec_i(3)),
+        tx_i_(tvec_i(0)),
+        ty_i_(tvec_i(1)),
+        tz_i_(tvec_i(2)),
+        qw_j_(qvec_j(0)),
+        qx_j_(qvec_j(1)),
+        qy_j_(qvec_j(2)),
+        qz_j_(qvec_j(3)),
+        tx_j_(tvec_j(0)),
+        ty_j_(tvec_j(1)),
+        tz_j_(tvec_j(2)),
+        patch_i_(patch_i),
+        imageBoundary_(std::move(imageBoundary)),
+        interpolator_j_(std::move(interpolator_j)),
+        constC_(constC)
+  {}
+
+  static ceres::CostFunction* CreateOneCam(const Eigen::Vector4d& qvec_i,
+                                     const Eigen::Vector3d& tvec_i,
+                                     const Eigen::Vector4d& qvec_j,
+                                     const Eigen::Vector3d& tvec_j,
+                                     const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                           double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentConstantCostFunction<CameraModel>, NumResidualPattern,
+            CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentConstantCostFunction(
+            qvec_i,tvec_i,qvec_j,tvec_j,patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  static ceres::CostFunction* CreateTwoCams(const Eigen::Vector4d& qvec_i,
+                                     const Eigen::Vector3d& tvec_i,
+                                     const Eigen::Vector4d& qvec_j,
+                                     const Eigen::Vector3d& tvec_j,
+                                     const IntensityPatch &patch_i,
+                                     std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>> interpolator_j,
+                                     Eigen::Vector2i imageBoundary,
+                                            double constC) {
+    return (new ceres::AutoDiffCostFunction<
+            PhotometricBundleAdjustmentConstantCostFunction<CameraModel>, NumResidualPattern,
+            CameraModel::kNumParams,CameraModel::kNumParams,
+            2,2,1>(
+        new PhotometricBundleAdjustmentConstantCostFunction(
+            qvec_i,tvec_i,qvec_j,tvec_j,patch_i,interpolator_j,imageBoundary,constC)));
+  }
+
+  /*One camera*/
+  template <typename T>
+  bool operator()(
+                  const T* const camera_params,
+                  const T* const ab_i, const T* const ab_j,
+                  const T* const invserseD,
+                  T* residuals) const {
+    const T qvec_i[4] = {T(qw_i_), T(qx_i_), T(qy_i_), T(qz_i_)};
+    const T tvec_i[3] = {T(tx_i_), T(ty_i_), T(tz_i_)};
+    const T qvec_j[4] = {T(qw_j_), T(qx_j_), T(qy_j_), T(qz_j_)};
+    const T tvec_j[3] = {T(tx_j_), T(ty_j_), T(tz_j_)};
+
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params,camera_params,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+  /*Two cameras*/
+  template <typename T>
+  bool operator()(
+      const T* const camera_params_i, const T* const camera_params_j,
+      const T* const ab_i, const T* const ab_j,
+      const T* const invserseD,
+      T* residuals) const {
+    const T qvec_i[4] = {T(qw_i_), T(qx_i_), T(qy_i_), T(qz_i_)};
+    const T tvec_i[3] = {T(tx_i_), T(ty_i_), T(tz_i_)};
+    const T qvec_j[4] = {T(qw_j_), T(qx_j_), T(qy_j_), T(qz_j_)};
+    const T tvec_j[3] = {T(tx_j_), T(ty_j_), T(tz_j_)};
+
+    return photometricLoss<CameraModel,T>(
+        patch_i_,imageBoundary_,
+        qvec_i,tvec_i,
+        qvec_j,tvec_j,
+        camera_params_i,camera_params_j,
+        ab_i,ab_j,interpolator_j_,invserseD,true,constC_,residuals
+    );
+  }
+
+ private:
+  const double qw_i_,qw_j_;
+  const double qx_i_,qx_j_;
+  const double qy_i_,qy_j_;
+  const double qz_i_,qz_j_;
+  const double tx_i_,tx_j_;
+  const double ty_i_,ty_j_;
+  const double tz_i_,tz_j_;
+  IntensityPatch patch_i_;
+  Eigen::Vector2i imageBoundary_;
+  std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>
+      interpolator_j_;
+  double constC_;
 };
 
 // Rig bundle adjustment cost function for variable camera pose and calibration

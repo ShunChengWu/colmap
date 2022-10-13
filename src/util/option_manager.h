@@ -59,6 +59,7 @@ struct SpatialMatchingOptions;
 struct TransitiveMatchingOptions;
 struct ImagePairsMatchingOptions;
 struct BundleAdjustmentOptions;
+struct PhotometricBundleAdjustmentOptions;
 struct IncrementalMapperOptions;
 struct RenderOptions;
 
@@ -102,6 +103,7 @@ class OptionManager {
   void AddTransitiveMatchingOptions();
   void AddImagePairsMatchingOptions();
   void AddBundleAdjustmentOptions();
+  void AddPhotometricBundleAdjustmentOptions();
   void AddMapperOptions();
   void AddPatchMatchStereoOptions();
   void AddStereoFusionOptions();
@@ -142,6 +144,7 @@ class OptionManager {
   std::shared_ptr<ImagePairsMatchingOptions> image_pairs_matching;
 
   std::shared_ptr<BundleAdjustmentOptions> bundle_adjustment;
+  std::shared_ptr<PhotometricBundleAdjustmentOptions> photometric_bundle_adjustment;
   std::shared_ptr<IncrementalMapperOptions> mapper;
 
   std::shared_ptr<mvs::PatchMatchOptions> patch_match_stereo;

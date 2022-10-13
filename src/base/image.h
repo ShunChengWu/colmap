@@ -41,9 +41,12 @@
 #include "base/point2d.h"
 #include "base/visibility_pyramid.h"
 #include "util/alignment.h"
+#include "util/bitmap.h"
 #include "util/logging.h"
 #include "util/math.h"
 #include "util/types.h"
+
+#include <ceres/cubic_interpolation.h>
 
 namespace colmap {
 
@@ -141,6 +144,44 @@ class Image {
   inline bool HasTvecPrior() const;
   inline void SetTvecPrior(const Eigen::Vector3d& tvec);
 
+  // Get image
+//  inline const class Bitmap& Bitmap() const {return bitmap_;}
+//  inline class Bitmap& Bitmap() {return bitmap_;}
+
+  // Get intensity
+  inline const std::vector<IntensityType> Intensity() const {return intensity_;}
+
+  // Get intensity gradient
+  inline const std::vector<IntensityType> IntensityGradient() const {return intensityGradient_;}
+
+  // Get intensity grid
+  inline const std::shared_ptr<ceres::Grid2D<IntensityType, 1>> IntensityGrad() const {return intensityGrid_; }
+
+  //
+  inline const std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>&
+      IntensityInterpolator() const {return intensityInterpolator_;}
+
+  inline std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>&
+  IntensityInterpolator() {return intensityInterpolator_; }
+
+  //
+  inline const std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>&
+      IntensityGradientInterpolator() const {return intensityGradientInterpolater_;}
+
+  inline std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>&
+  IntensityGradientInterpolator() {return intensityGradientInterpolater_;}
+
+  void SetImageWidth(int width) {imageWidth_ = width;}
+  void SetImageHeight(int height) {imageHeight_ = height;}
+  inline int ImageWidth(){return imageWidth_;}
+  inline int ImageHeight(){return imageHeight_;}
+
+  inline Eigen::Vector2d& AffineAB() {return affine_ab_;}
+  const inline Eigen::Vector2d& AffineAB() const {return affine_ab_;}
+
+  //
+  inline void InitForPBA(const class Bitmap &bitmap);
+
   // Access the coordinates of image points.
   inline const class Point2D& Point2D(const point2D_t point2D_idx) const;
   inline class Point2D& Point2D(const point2D_t point2D_idx);
@@ -176,6 +217,9 @@ class Image {
 
   // Normalize the quaternion vector.
   void NormalizeQvec();
+
+  // Load image to buffer
+
 
   // Compose the projection matrix from world to image space.
   Eigen::Matrix3x4d ProjectionMatrix() const;
@@ -242,6 +286,19 @@ class Image {
   // Data structure to compute the distribution of triangulated correspondences
   // in the image. Note that this structure is only usable after `SetUp`.
   VisibilityPyramid point3D_visibility_pyramid_;
+
+  //================
+  // PBA
+  //================
+  // Stroe Grayscale image
+//  class Bitmap bitmap_;
+  Eigen::Vector2d affine_ab_;
+  std::shared_ptr<ceres::Grid2D<IntensityType, 1>> intensityGrid_, intensityGradientGrid_;
+  std::shared_ptr<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType, 1>>>
+      intensityInterpolator_, intensityGradientInterpolater_;
+  std::vector<IntensityType> intensity_, intensityGradient_;
+
+  int imageWidth_, imageHeight_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -356,6 +413,65 @@ const std::vector<class Point2D>& Image::Points2D() const { return points2D_; }
 bool Image::IsPoint3DVisible(const point2D_t point2D_idx) const {
   return num_correspondences_have_point3D_.at(point2D_idx) > 0;
 }
+
+void Image::InitForPBA(const class Bitmap &bitmap) {
+  if (bitmap.NumBytes()==0) {
+    //image has not been read into the buffer
+    throw std::runtime_error("image has not been read into the buffer. call Bitmap().Read() first.");
+  }
+
+  auto width = bitmap.Width();
+  auto height = bitmap.Height();
+  auto totalSize = width*height;
+  intensity_.resize(totalSize);
+  intensityGradient_.resize(totalSize);
+
+  imageWidth_ = width;
+  imageHeight_ = height;
+
+  // copy color data and convet it to float
+  BitmapColor<uint8_t> color;
+  for (size_t w=0;w<width;++w) {
+    for (size_t h=0;h<height;++h) {
+      auto idx = w + h * width;
+      bitmap.GetPixel(w,h,&color);
+      intensity_[idx] = color.r;
+    }
+  }
+
+  // compute gradient
+  for (size_t y=1;y<height-1;++y) {
+    for (size_t x=1;x<width-1;++x) {
+      size_t idx = x+y*width;
+      double dx =
+          0.5 *
+          (intensity_[idx+1] - intensity_[idx-1]);
+      double dy =
+          0.5 *
+          (intensity_[idx+y*width]-intensity_[idx-y*width]);
+
+      if (!std::isfinite(dx)) dx = 0;
+      if (!std::isfinite(dy)) dy = 0;
+
+      intensityGradient_[idx] = sqrt(dx * dx + dy * dy);
+    }
+  }
+
+  // make grid
+  intensityGrid_ = std::make_shared<ceres::Grid2D<IntensityType ,1>>(
+      intensity_.data(), 0, height,0,width
+  );
+  intensityGradientGrid_ = std::make_shared<ceres::Grid2D<IntensityType ,1>>(
+      intensityGradient_.data(), 0, height,0,width
+  );
+
+  //set
+  intensityInterpolator_ = std::make_shared<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType,1>>>(
+      *intensityGrid_);
+  intensityGradientInterpolater_ = std::make_shared<ceres::BiCubicInterpolator<ceres::Grid2D<IntensityType,1>>>(
+      *intensityGradientGrid_);
+}
+
 
 }  // namespace colmap
 

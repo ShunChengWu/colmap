@@ -101,6 +101,15 @@ const image_pair_t kInvalidImagePairId =
 const point2D_t kInvalidPoint2DIdx = std::numeric_limits<point2D_t>::max();
 const point3D_t kInvalidPoint3DId = std::numeric_limits<point3D_t>::max();
 
+/*PBA realted*/
+typedef uint64_t pointInvD_t;
+using IntensityType = double;
+static const size_t NumResidualPattern = 8;
+typedef Eigen::Matrix<IntensityType, NumResidualPattern, 1> PatternIntensities;
+typedef Eigen::Matrix<double, NumResidualPattern, 1> Gradients;
+typedef Eigen::Matrix<double, 2,NumResidualPattern> PatternCoords;
+
+
 }  // namespace colmap
 
 // This file provides specializations of the templated hash function for

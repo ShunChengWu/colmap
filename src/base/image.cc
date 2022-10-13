@@ -55,7 +55,8 @@ Image::Image()
       qvec_(1.0, 0.0, 0.0, 0.0),
       tvec_(0.0, 0.0, 0.0),
       qvec_prior_(kNaN, kNaN, kNaN, kNaN),
-      tvec_prior_(kNaN, kNaN, kNaN) {}
+      tvec_prior_(kNaN, kNaN, kNaN),
+      affine_ab_(0,0) {}
 
 void Image::SetUp(const class Camera& camera) {
   CHECK_EQ(camera_id_, camera.CameraId());

@@ -46,6 +46,7 @@ int RunPointTriangulatorImpl(Reconstruction& reconstruction,
 
 int RunAutomaticReconstructor(int argc, char** argv);
 int RunBundleAdjuster(int argc, char** argv);
+int RunPhotometricBundleAdjuster(int argc, char** argv);
 int RunColorExtractor(int argc, char** argv);
 int RunMapper(int argc, char** argv);
 int RunHierarchicalMapper(int argc, char** argv);

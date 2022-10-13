@@ -36,7 +36,7 @@
 
 #include <Eigen/Core>
 
-#include "util/alignment.h"
+//#include "util/alignment.h"
 
 namespace colmap {
 

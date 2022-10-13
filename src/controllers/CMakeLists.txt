@@ -34,6 +34,7 @@ set(FOLDER_NAME "controllers")
 COLMAP_ADD_SOURCES(
     automatic_reconstruction.h automatic_reconstruction.cc
     bundle_adjustment.h bundle_adjustment.cc
+    photometric_bundle_adjustment.h photometric_bundle_adjustment.cc
     hierarchical_mapper.h hierarchical_mapper.cc
     incremental_mapper.h incremental_mapper.cc
 )

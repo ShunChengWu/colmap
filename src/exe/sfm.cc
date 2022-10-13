@@ -37,6 +37,7 @@
 #include "base/reconstruction.h"
 #include "controllers/automatic_reconstruction.h"
 #include "controllers/bundle_adjustment.h"
+#include "controllers/photometric_bundle_adjustment.h"
 #include "controllers/hierarchical_mapper.h"
 #include "exe/gui.h"
 #include "util/misc.h"
@@ -165,14 +166,15 @@ int RunBundleAdjuster(int argc, char** argv) {
 }
 
 int RunPhotometricBundleAdjuster(int argc, char** argv) {
-  throw std::runtime_error("not implemented");
+//  throw std::runtime_error("not implemented");
   std::string input_path;
   std::string output_path;
 
   OptionManager options;
+  options.AddImageOptions();
   options.AddRequiredOption("input_path", &input_path);
   options.AddRequiredOption("output_path", &output_path);
-  options.AddBundleAdjustmentOptions();
+  options.AddPhotometricBundleAdjustmentOptions();
   options.Parse(argc, argv);
 
   if (!ExistsDir(input_path)) {
@@ -188,7 +190,16 @@ int RunPhotometricBundleAdjuster(int argc, char** argv) {
   Reconstruction reconstruction;
   reconstruction.Read(input_path);
 
+  /*load images to reconstruction for PBA operations*/
+  reconstruction.ReadImagesForPBA(*options.image_path);
 
+  PhotometricBundleAdjustmentController pba_controller(options,&reconstruction);
+  pba_controller.Start();
+  pba_controller.Wait();
+
+  reconstruction.Write(output_path);
+
+  return EXIT_SUCCESS;
 }
 
 int RunColorExtractor(int argc, char** argv) {

@@ -43,6 +43,7 @@
 #include "mvs/meshing.h"
 #include "mvs/patch_match.h"
 #include "optim/bundle_adjustment.h"
+#include "optim/photometric_bundle_adjustment.h"
 #include "ui/render_options.h"
 #include "util/misc.h"
 #include "util/random.h"
@@ -67,6 +68,7 @@ OptionManager::OptionManager(bool add_project_options) {
   transitive_matching.reset(new TransitiveMatchingOptions());
   image_pairs_matching.reset(new ImagePairsMatchingOptions());
   bundle_adjustment.reset(new BundleAdjustmentOptions());
+  photometric_bundle_adjustment.reset(new PhotometricBundleAdjustmentOptions());
   mapper.reset(new IncrementalMapperOptions());
   patch_match_stereo.reset(new mvs::PatchMatchOptions());
   stereo_fusion.reset(new mvs::StereoFusionOptions());
@@ -181,6 +183,7 @@ void OptionManager::AddAllOptions() {
   AddTransitiveMatchingOptions();
   AddImagePairsMatchingOptions();
   AddBundleAdjustmentOptions();
+  AddPhotometricBundleAdjustmentOptions();
   AddMapperOptions();
   AddPatchMatchStereoOptions();
   AddStereoFusionOptions();
@@ -473,6 +476,43 @@ void OptionManager::AddBundleAdjustmentOptions() {
 //  AddAndRegisterMultiTokenOption("BundleAdjustment.fixed_tvecs",
 //                                 &bundle_adjustment->fixed_tvecs,
 //                                 "This is not the image_id, but the index of the image should be fixed in the image list");
+}
+
+void OptionManager::AddPhotometricBundleAdjustmentOptions() {
+  if (added_ba_options_) {
+    return;
+  }
+  added_ba_options_ = true;
+  //TODO: adjust options from BA to PBA
+  AddAndRegisterDefaultOption(
+      "PhotometricBundleAdjustment.max_num_iterations",
+      &photometric_bundle_adjustment->solver_options.max_num_iterations);
+  AddAndRegisterDefaultOption(
+      "PhotometricBundleAdjustment.max_linear_solver_iterations",
+      &photometric_bundle_adjustment->solver_options.max_linear_solver_iterations);
+  AddAndRegisterDefaultOption(
+      "PhotometricBundleAdjustment.function_tolerance",
+      &photometric_bundle_adjustment->solver_options.function_tolerance);
+  AddAndRegisterDefaultOption(
+      "PhotometricBundleAdjustment.gradient_tolerance",
+      &photometric_bundle_adjustment->solver_options.gradient_tolerance);
+  AddAndRegisterDefaultOption(
+      "PhotometricBundleAdjustment.parameter_tolerance",
+      &photometric_bundle_adjustment->solver_options.parameter_tolerance);
+  AddAndRegisterDefaultOption("PhotometricBundleAdjustment.refine_focal_length",
+                              &photometric_bundle_adjustment->refine_focal_length);
+  AddAndRegisterDefaultOption("PhotometricBundleAdjustment.refine_principal_point",
+                              &photometric_bundle_adjustment->refine_principal_point);
+  AddAndRegisterDefaultOption("PhotometricBundleAdjustment.refine_extra_params",
+                              &photometric_bundle_adjustment->refine_extra_params);
+  AddAndRegisterDefaultOption("PhotometricBundleAdjustment.refine_extrinsics",
+                              &photometric_bundle_adjustment->refine_extrinsics);
+  AddAndRegisterMultiTokenOption("PhotometricBundleAdjustment.fixed_poses",
+                                 &photometric_bundle_adjustment->fixed_poses,
+                                 "Image indices");
+  //  AddAndRegisterMultiTokenOption("BundleAdjustment.fixed_tvecs",
+  //                                 &photometric_bundle_adjustment->fixed_tvecs,
+  //                                 "This is not the image_id, but the index of the image should be fixed in the image list");
 }
 
 void OptionManager::AddMapperOptions() {
@@ -797,6 +837,7 @@ void OptionManager::ResetOptions(const bool reset_paths) {
   *transitive_matching = TransitiveMatchingOptions();
   *image_pairs_matching = ImagePairsMatchingOptions();
   *bundle_adjustment = BundleAdjustmentOptions();
+  *photometric_bundle_adjustment = PhotometricBundleAdjustmentOptions();
   *mapper = IncrementalMapperOptions();
   *patch_match_stereo = mvs::PatchMatchOptions();
   *stereo_fusion = mvs::StereoFusionOptions();
@@ -830,6 +871,7 @@ bool OptionManager::Check() {
   if (image_pairs_matching) success = success && image_pairs_matching->Check();
 
   if (bundle_adjustment) success = success && bundle_adjustment->Check();
+  if (photometric_bundle_adjustment) success = success && photometric_bundle_adjustment->Check();
   if (mapper) success = success && mapper->Check();
 
   if (patch_match_stereo) success = success && patch_match_stereo->Check();
