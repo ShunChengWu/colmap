@@ -479,10 +479,10 @@ void OptionManager::AddBundleAdjustmentOptions() {
 }
 
 void OptionManager::AddPhotometricBundleAdjustmentOptions() {
-  if (added_ba_options_) {
+  if (added_pba_options_) {
     return;
   }
-  added_ba_options_ = true;
+  added_pba_options_ = true;
   //TODO: adjust options from BA to PBA
   AddAndRegisterDefaultOption(
       "PhotometricBundleAdjustment.max_num_iterations",
@@ -799,6 +799,7 @@ void OptionManager::Reset() {
   options_int_.clear();
   options_double_.clear();
   options_string_.clear();
+  options_int_vector_.clear();
 
   added_log_options_ = false;
   added_random_options_ = false;
@@ -813,6 +814,7 @@ void OptionManager::Reset() {
   added_transitive_match_options_ = false;
   added_image_pairs_match_options_ = false;
   added_ba_options_ = false;
+  added_pba_options_ = false;
   added_mapper_options_ = false;
   added_patch_match_stereo_options_ = false;
   added_stereo_fusion_options_ = false;
@@ -995,6 +997,12 @@ void OptionManager::Write(const std::string& path) const {
     }
   }
 
+  for (const auto& option : options_int_vector_) {
+    if (!StringContains(option.first, ".")) {
+      pt.put(option.first,*option.second);
+    }
+  }
+
   for (const auto& option : options_bool_) {
     if (StringContains(option.first, ".")) {
       pt.put(option.first, *option.second);
@@ -1016,6 +1024,12 @@ void OptionManager::Write(const std::string& path) const {
   for (const auto& option : options_string_) {
     if (StringContains(option.first, ".")) {
       pt.put(option.first, *option.second);
+    }
+  }
+
+  for (const auto& option : options_int_vector_) {
+    if (StringContains(option.first, ".")) {
+      pt.put(option.first,*option.second);
     }
   }
 

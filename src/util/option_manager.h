@@ -190,6 +190,7 @@ class OptionManager {
   bool added_transitive_match_options_;
   bool added_image_pairs_match_options_;
   bool added_ba_options_;
+  bool added_pba_options_;
   bool added_mapper_options_;
   bool added_patch_match_stereo_options_;
   bool added_stereo_fusion_options_;
