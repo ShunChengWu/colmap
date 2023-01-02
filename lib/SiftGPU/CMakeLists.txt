@@ -47,8 +47,8 @@ else()
 endif()
 
 target_link_libraries(sift_gpu
-    ${SIFT_GPU_LIBRARIES}
-    ${GLEW_LIBRARIES}
-    ${OPENGL_gl_LIBRARY}
-    ${OPENGL_glu_LIBRARY}
+    PUBLIC ${SIFT_GPU_LIBRARIES}
+    PUBLIC ${GLEW_LIBRARIES}
+    PUBLIC ${OPENGL_gl_LIBRARY}
+    PUBLIC ${OPENGL_glu_LIBRARY}
 )
