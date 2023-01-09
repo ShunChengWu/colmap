@@ -420,7 +420,7 @@ void IncrementalMapperController::Reconstruct(
     ////////////////////////////////////////////////////////////////////////////
     // Register initial pair
     ////////////////////////////////////////////////////////////////////////////
-
+    //TODO: replace this when initial poses are given?
     if (reconstruction.NumRegImages() == 0) {
       image_t image_id1 = static_cast<image_t>(options_->init_image_id1);
       image_t image_id2 = static_cast<image_t>(options_->init_image_id2);
@@ -451,7 +451,7 @@ void IncrementalMapperController::Reconstruct(
 
       PrintHeading1(StringPrintf("Initializing with image pair #%d and #%d",
                                  image_id1, image_id2));
-      const bool reg_init_success = mapper.RegisterInitialImagePair(
+      const bool reg_init_success = mapper.RegisterInitialImagePair( //NOTE: this is where the initial pose are assgined.
           init_mapper_options, image_id1, image_id2);
       if (!reg_init_success) {
         std::cout << "  => Initialization failed - possible solutions:"
@@ -465,7 +465,7 @@ void IncrementalMapperController::Reconstruct(
         break;
       }
 
-      AdjustGlobalBundle(*options_, &mapper);
+//      AdjustGlobalBundle(*options_, &mapper);
       FilterPoints(*options_, &mapper);
       FilterImages(*options_, &mapper);
 
@@ -532,7 +532,7 @@ void IncrementalMapperController::Reconstruct(
 
         if (reg_next_success) {
           TriangulateImage(*options_, next_image, &mapper);
-          IterativeLocalRefinement(*options_, next_image_id, &mapper);
+//          IterativeLocalRefinement(*options_, next_image_id, &mapper);
 
           if (reconstruction.NumRegImages() >=
                   options_->ba_global_images_ratio * ba_prev_num_reg_images ||
@@ -542,7 +542,7 @@ void IncrementalMapperController::Reconstruct(
                   options_->ba_global_points_ratio * ba_prev_num_points ||
               reconstruction.NumPoints3D() >=
                   options_->ba_global_points_freq + ba_prev_num_points) {
-            IterativeGlobalRefinement(*options_, &mapper);
+//            IterativeGlobalRefinement(*options_, &mapper);
             ba_prev_num_points = reconstruction.NumPoints3D();
             ba_prev_num_reg_images = reconstruction.NumRegImages();
           }
@@ -589,7 +589,7 @@ void IncrementalMapperController::Reconstruct(
       if (!reg_next_success && prev_reg_next_success) {
         reg_next_success = true;
         prev_reg_next_success = false;
-        IterativeGlobalRefinement(*options_, &mapper);
+//        IterativeGlobalRefinement(*options_, &mapper);
       } else {
         prev_reg_next_success = reg_next_success;
       }

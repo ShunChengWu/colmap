@@ -144,6 +144,8 @@ class Image {
   inline bool HasTvecPrior() const;
   inline void SetTvecPrior(const Eigen::Vector3d& tvec);
 
+  inline bool HasPosePrior() const;
+
   // Get image
 //  inline const class Bitmap& Bitmap() const {return bitmap_;}
 //  inline class Bitmap& Bitmap() {return bitmap_;}
@@ -397,6 +399,8 @@ inline double Image::TvecPrior(const size_t idx) const {
 inline double& Image::TvecPrior(const size_t idx) { return tvec_prior_(idx); }
 
 inline bool Image::HasTvecPrior() const { return !IsNaN(tvec_prior_.sum()); }
+
+inline bool Image::HasPosePrior() const { return this->HasTvecPrior() && this->HasQvecPrior();}
 
 void Image::SetTvecPrior(const Eigen::Vector3d& tvec) { tvec_prior_ = tvec; }
 
