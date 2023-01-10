@@ -125,6 +125,10 @@ class IncrementalMapper {
     // Prefer images with initial pose given
     bool prefer_has_poses = true;
 
+    // Normalize scene for numerical stability and
+    // to avoid large scale changes in viewer.
+    bool normalize_reconstruction = true;
+
     // Method to find and select next best image to register.
     enum class ImageSelectionMethod {
       MAX_VISIBLE_POINTS_NUM,

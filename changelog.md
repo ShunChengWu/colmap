@@ -1,7 +1,7 @@
 # TODO
 - [x] split image set when mapping
   - `--image_list_path` will do
-- [ ] Accepting known poses in estimation
+- [x] Accepting known poses in estimation
 - [ ] Combineing known and unknown pose
   - This should do with incremental mapping
 - [x] Allow fixing existing image
@@ -28,5 +28,10 @@ Try to make `sfm/incremental_mapper.cc:l1163:EstimateInitialTwoViewGeometry` wor
 3. How to allow `IncrementalMapper::RegisterNextImage` taking known pose?
    - In `srm/incremental_mapper.cc:l519`, Continue tracks needs inliers to be added to `reconstruction_` and `triangulator_`.
 
+# Logs
 2023/1/9: Can do incremental mapping + triangulation without BA refinement. If BA is used, the scale will be wrong. 
 I guess the problem is the no poses are fixed. Need to fix at least two to ensure correct scale
+
+todo: check if point_triangulation fixes all poses, or does not optimize pose.
+
+2023/1/10: Add fix given pose and all extrinsics option in mapper.

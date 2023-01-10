@@ -712,12 +712,31 @@ bool IncrementalMapper::AdjustGlobalBundle(
     }
   }
 
-  // Fix 7-DOFs of the bundle adjustment problem.
-  ba_config.SetConstantPose(reg_image_ids[0]);
-  if (!options.fix_existing_images ||
-      !existing_image_ids_.count(reg_image_ids[1])) {
-    ba_config.SetConstantTvec(reg_image_ids[1], {0});
+  // Fix Given image indices
+  if(ba_options.fixed_poses.empty()) {
+    // Fix 7-DOFs of the bundle adjustment problem.
+    ba_config.SetConstantPose(reg_image_ids[0]);
+    if (!options.fix_existing_images ||
+        !existing_image_ids_.count(reg_image_ids[1])) {
+      ba_config.SetConstantTvec(reg_image_ids[1], {0});
+    }
+  } else {
+    std::stringstream ss;
+    for (auto idx:ba_options.fixed_poses) {
+      if (existing_image_ids_.count(idx)) {
+        ss << idx << " ";
+        ba_config.SetConstantPose(idx);
+      }
+    }
+    LOG(INFO) << "use custom fixed poses with image ids: " << ss.str();
   }
+
+//  // Fix 7-DOFs of the bundle adjustment problem.
+//  ba_config.SetConstantPose(reg_image_ids[0]);
+//  if (!options.fix_existing_images ||
+//      !existing_image_ids_.count(reg_image_ids[1])) {
+//    ba_config.SetConstantTvec(reg_image_ids[1], {0});
+//  }
 
   // Run bundle adjustment.
   BundleAdjuster bundle_adjuster(ba_options, ba_config);
@@ -727,7 +746,8 @@ bool IncrementalMapper::AdjustGlobalBundle(
 
   // Normalize scene for numerical stability and
   // to avoid large scale changes in viewer.
-  reconstruction_->Normalize();
+  if (options.normalize_reconstruction)
+    reconstruction_->Normalize();
 
   return true;
 }

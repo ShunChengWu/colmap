@@ -549,6 +549,12 @@ void OptionManager::AddMapperOptions() {
                               &mapper->ba_refine_principal_point);
   AddAndRegisterDefaultOption("Mapper.ba_refine_extra_params",
                               &mapper->ba_refine_extra_params);
+  AddAndRegisterDefaultOption("Mapper.ba_refine_extrinsics",
+                              &mapper->ba_refine_extrinsics);
+  AddAndRegisterMultiTokenOption("Mapper.fixed_poses",
+                                 &mapper->fixed_poses,
+                                 "Image indices");
+
   AddAndRegisterDefaultOption(
       "Mapper.ba_min_num_residuals_for_multi_threading",
       &mapper->ba_min_num_residuals_for_multi_threading);
@@ -587,6 +593,9 @@ void OptionManager::AddMapperOptions() {
                               &mapper->snapshot_images_freq);
   AddAndRegisterDefaultOption("Mapper.fix_existing_images",
                               &mapper->fix_existing_images);
+  AddAndRegisterDefaultOption("Mapper.normalize_reconstruction",
+                              &mapper->normalize_reconstruction);
+
 
   // IncrementalMapper.
   AddAndRegisterDefaultOption("Mapper.init_min_num_inliers",

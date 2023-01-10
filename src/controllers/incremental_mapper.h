@@ -85,6 +85,7 @@ struct IncrementalMapperOptions {
   bool ba_refine_focal_length = true;
   bool ba_refine_principal_point = false;
   bool ba_refine_extra_params = true;
+  bool ba_refine_extrinsics = true;
 
   // The minimum number of residuals per bundle adjustment problem to
   // enable multi-threading solving of the problems.
@@ -135,6 +136,12 @@ struct IncrementalMapperOptions {
 
   // If reconstruction is provided as input, fix the existing image poses.
   bool fix_existing_images = false;
+
+  // Normalize scene for numerical stability and
+  // to avoid large scale changes in viewer.
+  bool normalize_reconstruction = true;
+
+  std::vector<int> fixed_poses = {};
 
   IncrementalMapper::Options Mapper() const;
   IncrementalTriangulator::Options Triangulation() const;
