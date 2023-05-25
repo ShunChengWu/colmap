@@ -281,17 +281,15 @@ bool IncrementalMapper::RegisterInitialImagePair(const Options& options,
   //////////////////////////////////////////////////////////////////////////////
   // Estimate two-view geometry
   //////////////////////////////////////////////////////////////////////////////
-
-  if (!EstimateInitialTwoViewGeometry(options, image_id1, image_id2)) {
-    return false;
-  }
-
   if(image1.HasPosePrior() && image2.HasPosePrior()) {
     image1.Qvec() = image1.QvecPrior();
     image1.Tvec() = image1.TvecPrior();
     image2.Qvec() = image2.QvecPrior();
     image2.Tvec() = image2.TvecPrior();
   } else {
+    if (!EstimateInitialTwoViewGeometry(options, image_id1, image_id2)) {
+      return false;
+    }
     image1.Qvec() = ComposeIdentityQuaternion();
     image1.Tvec() = Eigen::Vector3d(0, 0, 0);
     image2.Qvec() = prev_init_two_view_geometry_.qvec;
