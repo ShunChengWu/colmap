@@ -29,7 +29,7 @@
 #
 # Author: Johannes L. Schoenberger (jsch-at-demuc-dot-de)
 
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.13)
 
 project(COLMAP)
 
@@ -99,7 +99,9 @@ find_package(Boost REQUIRED COMPONENTS
              system
              unit_test_framework)
 
-find_package(Eigen3 REQUIRED)
+SET(WITH_EIGEN TRUE)
+INCLUDE(UseEigen3)
+find_package(Eigen3 3.4 REQUIRED)
 
 find_package(FreeImage REQUIRED)
 
