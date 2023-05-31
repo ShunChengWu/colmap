@@ -42,3 +42,4 @@ doc/_build
 *.out
 *.app
 cmake-build-*
+external/
