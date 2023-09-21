@@ -595,6 +595,8 @@ void OptionManager::AddMapperOptions() {
                               &mapper->fix_existing_images);
   AddAndRegisterDefaultOption("Mapper.normalize_reconstruction",
                               &mapper->normalize_reconstruction);
+  AddAndRegisterDefaultOption("Mapper.prefer_has_poses",
+                              &mapper->prefer_has_poses);
 
 
   // IncrementalMapper.

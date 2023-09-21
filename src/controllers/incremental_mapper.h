@@ -141,6 +141,8 @@ struct IncrementalMapperOptions {
   // to avoid large scale changes in viewer.
   bool normalize_reconstruction = true;
 
+  bool prefer_has_poses = true;
+
   std::vector<int> fixed_poses = {};
 
   IncrementalMapper::Options Mapper() const;

@@ -203,6 +203,7 @@ IncrementalMapper::Options IncrementalMapperOptions::Mapper() const {
   options.local_ba_num_images = ba_local_num_images;
   options.fix_existing_images = fix_existing_images;
   options.normalize_reconstruction = normalize_reconstruction;
+  options.prefer_has_poses = prefer_has_poses;
   return options;
 }
 

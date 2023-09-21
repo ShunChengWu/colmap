@@ -220,21 +220,27 @@ std::vector<image_t> IncrementalMapper::FindNextImages(const Options& options) {
   std::vector<std::pair<image_t, float>> other_image_ranks;
 
   // Append images that have not failed to register before.
+  size_t counter_registered = 0;
+  size_t counter_numVisiblePoint3D = 0;
+  size_t counter_trials = 0;
   for (const auto& image : reconstruction_->Images()) {
     // Skip images that are already registered.
     if (image.second.IsRegistered()) {
+      counter_registered++;
       continue;
     }
 
     // Only consider images with a sufficient number of visible points.
     if (image.second.NumVisiblePoints3D() <
         static_cast<size_t>(options.abs_pose_min_num_inliers)) {
+      counter_numVisiblePoint3D++;
       continue;
     }
 
     // Only try registration for a certain maximum number of times.
     const size_t num_reg_trials = num_reg_trials_[image.first];
     if (num_reg_trials >= static_cast<size_t>(options.max_reg_trials)) {
+      counter_trials++;
       continue;
     }
 
@@ -247,6 +253,8 @@ std::vector<image_t> IncrementalMapper::FindNextImages(const Options& options) {
       other_image_ranks.emplace_back(image.first, rank);
     }
   }
+
+//  std::cout << "  => num images: " << reconstruction_->Images().size() << "(registered: " << counter_registered << ", visiblePt: " << counter_numVisiblePoint3D << ", trials: " << counter_trials << ")" << std::endl;
 
   std::vector<image_t> ranked_images_ids;
   SortAndAppendNextImages(image_ranks, &ranked_images_ids);
@@ -334,6 +342,7 @@ bool IncrementalMapper::RegisterInitialImagePair(const Options& options,
         TriangulatePoint(proj_matrix1, proj_matrix2, point1_N, point2_N);
     const double tri_angle =
         CalculateTriangulationAngle(proj_center1, proj_center2, xyz);
+//    std::cout << tri_angle << std::endl;
     if (tri_angle >= min_tri_angle_rad &&
         HasPointPositiveDepth(proj_matrix1, xyz) &&
         HasPointPositiveDepth(proj_matrix2, xyz)) {
@@ -344,6 +353,56 @@ bool IncrementalMapper::RegisterInitialImagePair(const Options& options,
   }
 
   return true;
+}
+static void ComputeSquaredReprojectionError(
+    const std::vector<Eigen::Vector2d>& points2D,
+    const std::vector<Eigen::Vector3d>& points3D,
+    const Eigen::Matrix3x4d& proj_matrix, std::vector<double>* residuals) {
+  CHECK_EQ(points2D.size(), points3D.size());
+
+  residuals->resize(points2D.size());
+
+  // Note that this code might not be as nice as Eigen expressions,
+  // but it is significantly faster in various tests.
+
+  const double P_00 = proj_matrix(0, 0);
+  const double P_01 = proj_matrix(0, 1);
+  const double P_02 = proj_matrix(0, 2);
+  const double P_03 = proj_matrix(0, 3);
+  const double P_10 = proj_matrix(1, 0);
+  const double P_11 = proj_matrix(1, 1);
+  const double P_12 = proj_matrix(1, 2);
+  const double P_13 = proj_matrix(1, 3);
+  const double P_20 = proj_matrix(2, 0);
+  const double P_21 = proj_matrix(2, 1);
+  const double P_22 = proj_matrix(2, 2);
+  const double P_23 = proj_matrix(2, 3);
+
+  for (size_t i = 0; i < points2D.size(); ++i) {
+    const double X_0 = points3D[i](0);
+    const double X_1 = points3D[i](1);
+    const double X_2 = points3D[i](2);
+
+    // Project 3D point from world to camera.
+    const double px_2 = P_20 * X_0 + P_21 * X_1 + P_22 * X_2 + P_23;
+
+    // Check if 3D point is in front of camera.
+    if (px_2 > std::numeric_limits<double>::epsilon()) {
+      const double px_0 = P_00 * X_0 + P_01 * X_1 + P_02 * X_2 + P_03;
+      const double px_1 = P_10 * X_0 + P_11 * X_1 + P_12 * X_2 + P_13;
+
+      const double x_0 = points2D[i](0);
+      const double x_1 = points2D[i](1);
+
+      const double inv_px_2 = 1.0 / px_2;
+      const double dx_0 = x_0 - px_0 * inv_px_2;
+      const double dx_1 = x_1 - px_1 * inv_px_2;
+
+      (*residuals)[i] = dx_0 * dx_0 + dx_1 * dx_1;
+    } else {
+      (*residuals)[i] = std::numeric_limits<double>::max();
+    }
+  }
 }
 
 bool IncrementalMapper::RegisterNextImage(const Options& options,
@@ -366,25 +425,66 @@ bool IncrementalMapper::RegisterNextImage(const Options& options,
     return false;
   }
 
-  // If known pose
-  if (image.HasPosePrior()){
-    image.Tvec() = image.TvecPrior();
-    image.Qvec() = image.QvecPrior();
-    reconstruction_->RegisterImage(image_id);
-    RegisterImageEvent(image_id);
-    return true;
+  std::vector<std::pair<point2D_t, point3D_t>> tri_corrs;
+  std::vector<Eigen::Vector2d> tri_points2D;
+  std::vector<Eigen::Vector3d> tri_points3D;
+  size_t num_inliers = 0;
+  std::vector<char> inlier_mask;
+  //
+  AbsolutePoseEstimationOptions abs_pose_options;
+  abs_pose_options.num_threads = options.num_threads;
+  abs_pose_options.num_focal_length_samples = 30;
+  abs_pose_options.min_focal_length_ratio = options.min_focal_length_ratio;
+  abs_pose_options.max_focal_length_ratio = options.max_focal_length_ratio;
+  abs_pose_options.ransac_options.max_error = options.abs_pose_max_error;
+  abs_pose_options.ransac_options.min_inlier_ratio =
+      options.abs_pose_min_inlier_ratio;
+  // Use high confidence to avoid preemptive termination of P3P RANSAC
+  // - too early termination may lead to bad registration.
+  abs_pose_options.ransac_options.min_num_trials = 100;
+  abs_pose_options.ransac_options.max_num_trials = 10000;
+  abs_pose_options.ransac_options.confidence = 0.99999;
+
+  AbsolutePoseRefinementOptions abs_pose_refinement_options;
+  if (num_reg_images_per_camera_[image.CameraId()] > 0) {
+    // Camera already refined from another image with the same camera.
+    if (camera.HasBogusParams(options.min_focal_length_ratio,
+                              options.max_focal_length_ratio,
+                              options.max_extra_param)) {
+      // Previously refined camera has bogus parameters,
+      // so reset parameters and try to re-estimage.
+      camera.SetParams(database_cache_->Camera(image.CameraId()).Params());
+      abs_pose_options.estimate_focal_length = !camera.HasPriorFocalLength();
+      abs_pose_refinement_options.refine_focal_length = true;
+      abs_pose_refinement_options.refine_extra_params = true;
+    } else {
+      abs_pose_options.estimate_focal_length = false;
+      abs_pose_refinement_options.refine_focal_length = false;
+      abs_pose_refinement_options.refine_extra_params = false;
+    }
+  } else {
+    // Camera not refined before. Note that the camera parameters might have
+    // been changed before but the image was filtered, so we explicitly reset
+    // the camera parameters and try to re-estimate them.
+    camera.SetParams(database_cache_->Camera(image.CameraId()).Params());
+    abs_pose_options.estimate_focal_length = !camera.HasPriorFocalLength();
+    abs_pose_refinement_options.refine_focal_length = true;
+    abs_pose_refinement_options.refine_extra_params = true;
+  }
+
+  if (!options.abs_pose_refine_focal_length) {
+    abs_pose_options.estimate_focal_length = false;
+    abs_pose_refinement_options.refine_focal_length = false;
+  }
+
+  if (!options.abs_pose_refine_extra_params) {
+    abs_pose_refinement_options.refine_extra_params = false;
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // Search for 2D-3D correspondences
   //////////////////////////////////////////////////////////////////////////////
-
   const int kCorrTransitivity = 1;
-
-  std::vector<std::pair<point2D_t, point3D_t>> tri_corrs;
-  std::vector<Eigen::Vector2d> tri_points2D;
-  std::vector<Eigen::Vector3d> tri_points3D;
-
   for (point2D_t point2D_idx = 0; point2D_idx < image.NumPoints2D();
        ++point2D_idx) {
     const Point2D& point2D = image.Point2D(point2D_idx);
@@ -440,82 +540,59 @@ bool IncrementalMapper::RegisterNextImage(const Options& options,
     return false;
   }
 
-  //////////////////////////////////////////////////////////////////////////////
-  // 2D-3D estimation
-  //////////////////////////////////////////////////////////////////////////////
+  // If known pose
+  if (image.HasPosePrior()){
+    image.Tvec() = image.TvecPrior();
+    image.Qvec() = image.QvecPrior();
+    const auto& projectionMatrix = image.ProjectionMatrix();
+    std::vector<double> residuals;
+    auto num_samples = tri_points2D.size();
+    double max_residual = options.abs_pose_max_error * options.abs_pose_max_error;
 
-  // Only refine / estimate focal length, if no focal length was specified
-  // (manually or through EXIF) and if it was not already estimated previously
-  // from another image (when multiple images share the same camera
-  // parameters)
-
-  AbsolutePoseEstimationOptions abs_pose_options;
-  abs_pose_options.num_threads = options.num_threads;
-  abs_pose_options.num_focal_length_samples = 30;
-  abs_pose_options.min_focal_length_ratio = options.min_focal_length_ratio;
-  abs_pose_options.max_focal_length_ratio = options.max_focal_length_ratio;
-  abs_pose_options.ransac_options.max_error = options.abs_pose_max_error;
-  abs_pose_options.ransac_options.min_inlier_ratio =
-      options.abs_pose_min_inlier_ratio;
-  // Use high confidence to avoid preemptive termination of P3P RANSAC
-  // - too early termination may lead to bad registration.
-  abs_pose_options.ransac_options.min_num_trials = 100;
-  abs_pose_options.ransac_options.max_num_trials = 10000;
-  abs_pose_options.ransac_options.confidence = 0.99999;
-
-  AbsolutePoseRefinementOptions abs_pose_refinement_options;
-  if (num_reg_images_per_camera_[image.CameraId()] > 0) {
-    // Camera already refined from another image with the same camera.
-    if (camera.HasBogusParams(options.min_focal_length_ratio,
-                              options.max_focal_length_ratio,
-                              options.max_extra_param)) {
-      // Previously refined camera has bogus parameters,
-      // so reset parameters and try to re-estimage.
-      camera.SetParams(database_cache_->Camera(image.CameraId()).Params());
-      abs_pose_options.estimate_focal_length = !camera.HasPriorFocalLength();
-      abs_pose_refinement_options.refine_focal_length = true;
-      abs_pose_refinement_options.refine_extra_params = true;
-    } else {
-      abs_pose_options.estimate_focal_length = false;
-      abs_pose_refinement_options.refine_focal_length = false;
-      abs_pose_refinement_options.refine_extra_params = false;
+    // Normalize image coordinates with current camera hypothesis.
+    std::vector<Eigen::Vector2d> points2D_N(tri_points2D.size());
+    for (size_t i = 0; i < tri_points2D.size(); ++i) {
+      points2D_N[i] = camera.ImageToWorld(tri_points2D[i]);
     }
+
+    ComputeSquaredReprojectionError(points2D_N,tri_points3D,projectionMatrix,&residuals);
+
+    inlier_mask.resize(num_samples);
+    bool status;
+    for (size_t i = 0; i < residuals.size(); ++i) {
+      inlier_mask[i] = residuals[i] <= max_residual;
+      num_inliers += residuals[i] <= max_residual;
+    }
+
+    if (num_inliers < static_cast<size_t>(options.abs_pose_min_num_inliers)) {
+      return false;
+    }
+
   } else {
-    // Camera not refined before. Note that the camera parameters might have
-    // been changed before but the image was filtered, so we explicitly reset
-    // the camera parameters and try to re-estimate them.
-    camera.SetParams(database_cache_->Camera(image.CameraId()).Params());
-    abs_pose_options.estimate_focal_length = !camera.HasPriorFocalLength();
-    abs_pose_refinement_options.refine_focal_length = true;
-    abs_pose_refinement_options.refine_extra_params = true;
-  }
+    //////////////////////////////////////////////////////////////////////////////
+    // 2D-3D estimation
+    //////////////////////////////////////////////////////////////////////////////
 
-  if (!options.abs_pose_refine_focal_length) {
-    abs_pose_options.estimate_focal_length = false;
-    abs_pose_refinement_options.refine_focal_length = false;
-  }
+    // Only refine / estimate focal length, if no focal length was specified
+    // (manually or through EXIF) and if it was not already estimated previously
+    // from another image (when multiple images share the same camera
+    // parameters)
 
-  if (!options.abs_pose_refine_extra_params) {
-    abs_pose_refinement_options.refine_extra_params = false;
-  }
+    if (!EstimateAbsolutePose(abs_pose_options, tri_points2D, tri_points3D,
+                              &image.Qvec(), &image.Tvec(), &camera, &num_inliers,
+                              &inlier_mask)) {
+      return false;
+    }
 
-  size_t num_inliers;
-  std::vector<char> inlier_mask;
-
-  if (!EstimateAbsolutePose(abs_pose_options, tri_points2D, tri_points3D,
-                            &image.Qvec(), &image.Tvec(), &camera, &num_inliers,
-                            &inlier_mask)) {
-    return false;
+    if (num_inliers < static_cast<size_t>(options.abs_pose_min_num_inliers)) {
+      return false;
+    }
   }
-
-  if (num_inliers < static_cast<size_t>(options.abs_pose_min_num_inliers)) {
-    return false;
-  }
+  printf("num_inliers: %zu\n", num_inliers );
 
   //////////////////////////////////////////////////////////////////////////////
   // Pose refinement
   //////////////////////////////////////////////////////////////////////////////
-
   if (!RefineAbsolutePose(abs_pose_refinement_options, inlier_mask,
                           tri_points2D, tri_points3D, &image.Qvec(),
                           &image.Tvec(), &camera)) {
@@ -525,7 +602,6 @@ bool IncrementalMapper::RegisterNextImage(const Options& options,
   //////////////////////////////////////////////////////////////////////////////
   // Continue tracks
   //////////////////////////////////////////////////////////////////////////////
-
   reconstruction_->RegisterImage(image_id);
   RegisterImageEvent(image_id);
 
@@ -541,7 +617,6 @@ bool IncrementalMapper::RegisterNextImage(const Options& options,
       }
     }
   }
-
   return true;
 }
 
@@ -1240,6 +1315,13 @@ bool IncrementalMapper::EstimateInitialTwoViewGeometry(
     two_view_geometry_options.ransac_options.max_error = options.init_max_error;
     two_view_geometry.EstimateCalibrated(camera1, points1, camera2, points2,
                                          matches, two_view_geometry_options);
+
+    if (image1.HasQvecPrior() && image1.HasTvecPrior() && image2.HasQvecPrior() && image2.HasTvecPrior()) {
+      prev_init_image_pair_id_ = image_pair_id;
+//      two_view_geometry
+      prev_init_two_view_geometry_ = two_view_geometry;
+      return true;
+    }
 
     if (!two_view_geometry.EstimateRelativePose(camera1, points1, camera2,
                                                 points2)) {
